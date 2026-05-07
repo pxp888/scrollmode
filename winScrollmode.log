@@ -1,0 +1,10 @@
+2026-05-07 18:01:18,013 [INFO] --- Log Started ---
+2026-05-07 18:01:18,096 [INFO] [Core] Config Loaded: Msg=0x20b, Data=2
+2026-05-07 18:01:22,828 [INFO] [HookThread] Hook set successfully (Handle: 14879027)
+2026-05-07 18:01:29,220 [INFO] [HookThread] Hook unhooked and thread exiting.
+2026-05-07 18:01:41,306 [INFO] Traceback (most recent call last):
+2026-05-07 18:01:41,306 [INFO] File "C:\Users\pxper\Desktop\code\scrollmode\winScrollmode.py", line 447, in <module>
+2026-05-07 18:01:41,306 [INFO] root.mainloop()
+2026-05-07 18:01:41,306 [INFO] File "C:\Users\pxper\Anaconda3\envs\k2\lib\tkinter\__init__.py", line 1458, in mainloop
+2026-05-07 18:01:41,307 [INFO] self.tk.mainloop(n)
+2026-05-07 18:01:41,307 [INFO] KeyboardInterrupt

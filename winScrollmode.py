@@ -9,6 +9,32 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import pystray
 from PIL import Image
+import logging
+
+# Set up logging for PyInstaller console=False mode
+def setup_logging():
+    if getattr(sys, 'frozen', False):
+        log_dir = os.path.dirname(sys.executable)
+    else:
+        log_dir = os.path.dirname(os.path.abspath(__file__))
+    log_path = os.path.join(log_dir, 'winScrollmode.log')
+    
+    logging.basicConfig(
+        filename=log_path,
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        filemode='a'
+    )
+    # Redirect print to logging
+    class LogWriter:
+        def write(self, message):
+            if message.strip():
+                logging.info(message.strip())
+        def flush(self):
+            pass
+    sys.stdout = LogWriter()
+    sys.stderr = LogWriter()
+    print("--- Log Started ---")
 
 # --- Win32 Constants & Types ---
 user32 = ctypes.windll.user32
@@ -94,6 +120,7 @@ class ScrollController:
         self.scroll_mode = False
         self.hook_thread = None
         self.hook_thread_id = None
+        self.h_hook = None
         self.scroll_queue = queue.Queue()
         # Robust path handling for PyInstaller compatibility
         if getattr(sys, 'frozen', False):
@@ -233,6 +260,7 @@ class ScrollController:
             self.stop_hook_thread()
             self.root.after(0, lambda: self.toggle_btn.config(text="START ENGINE", bg="#7AA2F7"))
         else:
+            self.scroll_mode = False # Reset mode on start
             self.start_hook_thread()
             self.root.after(0, lambda: self.toggle_btn.config(text="STOP ENGINE", bg="#F7768E"))
 
@@ -277,6 +305,7 @@ class ScrollController:
 
     def stop_hook_thread(self):
         self.is_active = False
+        self.scroll_mode = False # Ensure reset
         if self.hook_thread_id:
             user32.PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0)
         self.hook_thread = None
@@ -284,19 +313,16 @@ class ScrollController:
     def _run_hook_loop(self):
         self.hook_thread_id = kernel32.GetCurrentThreadId()
         
-        # Set Hook (Try None first as it worked in the crash version)
-        h_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self.hook_proc_delegate, None, 0)
-        if not h_hook:
-            err = ctypes.get_last_error()
-            print(f"[HookThread] Failed to set hook! Error Code: {err} ({ctypes.WinError(err)})")
-            # If NULL fails, try with module handle
-            h_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self.hook_proc_delegate, kernel32.GetModuleHandleW(None), 0)
-            if not h_hook:
-                err2 = ctypes.get_last_error()
-                print(f"[HookThread] Retry with ModuleHandle failed too! Code: {err2}")
+        # Set Hook
+        self.h_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self.hook_proc_delegate, kernel32.GetModuleHandleW(None), 0)
+        if not self.h_hook:
+            # Fallback to None if ModuleHandle fails (rare)
+            self.h_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self.hook_proc_delegate, None, 0)
+            if not self.h_hook:
+                print(f"[HookThread] Critical: Failed to set hook! Error: {ctypes.WinError(ctypes.get_last_error())}")
                 return
         
-        print(f"[HookThread] Hook set successfully (ID: {hex(h_hook)})")
+        print(f"[HookThread] Hook set successfully (Handle: {self.h_hook})")
 
         # Register window for Raw Input
         class_name = f"ScrollHook_{self.hook_thread_id}"
@@ -313,7 +339,9 @@ class ScrollController:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 
-        user32.UnhookWindowsHookEx(h_hook)
+        if self.h_hook:
+            user32.UnhookWindowsHookEx(self.h_hook)
+            self.h_hook = None
         user32.DestroyWindow(hwnd)
         print("[HookThread] Hook unhooked and thread exiting.")
 
@@ -321,7 +349,7 @@ class ScrollController:
         if nCode == 0: # HC_ACTION
             event = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
             if event.flags & 1: 
-                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+                return user32.CallNextHookEx(self.h_hook, nCode, wParam, lParam)
 
             mouse_data = event.mouseData >> 16
             
@@ -353,7 +381,7 @@ class ScrollController:
                 if self.scroll_mode and wParam == WM_MOUSEMOVE:
                     return 1
 
-        return user32.CallNextHookEx(None, nCode, wParam, lParam)
+        return user32.CallNextHookEx(self.h_hook, nCode, wParam, lParam)
 
     def wnd_proc(self, hwnd, msg, wParam, lParam):
         if msg == WM_INPUT:
@@ -407,8 +435,13 @@ class ScrollController:
         sys.exit(0)
 
 if __name__ == "__main__":
+    # 1. Set DPI Awareness as early as possible
     try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except: user32.SetProcessDPIAware()
+    
+    # 2. Setup Logging/Redirection for Windowed Mode
+    setup_logging()
+    
     root = tk.Tk()
     app = ScrollController(root)
     root.mainloop()
